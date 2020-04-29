@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import zipfile
+import tempfile
+from pathlib import Path
+import plistlib
+
+if len(sys.argv) < 3:
+    print("class-dump-ipa by hc20k!")
+    print("Usage: cdipa [IPA] [Output]"); exit(1);
+
+ipa_path = sys.argv[1]
+h_path = sys.argv[2]
+
+print("Unzipping IPA")
+
+# unzip
+tmp_ext = tempfile.TemporaryDirectory().name;
+os.system("unzip "+ipa_path+" -d "+tmp_ext + " > /dev/null")
+
+print("Searching for Info.plist")
+# look for info.plist
+
+for filename in Path(tmp_ext+"/Payload/").glob('*/Info.plist'):
+    info = filename
+
+if not info:
+    print("Failed to find Info.plist."); exit(1);
+
+appfolder = os.path.dirname(info)
+
+with open(info, 'rb') as fp:
+    info = plistlib.load(fp)
+
+executable = info["CFBundleExecutable"]
+print("Dumping Executable: "+executable)
+
+# dump main Executable
+os.system("class-dump -H "+appfolder+"/"+executable+" -o "+h_path)
+
+# dump Frameworks
+
+framework_infos = []
+
+for filename in Path(appfolder+"/Frameworks/").glob('*/Info.plist'):
+    framework_infos.append(filename)
+
+for f_info in framework_infos:
+    # dump
+    with open(f_info, 'rb') as fp:
+        info = plistlib.load(fp)
+        f_exec = info["CFBundleExecutable"]
+        print("Dumping Framework: "+f_exec)
+
+    os.system("class-dump -H "+os.path.dirname(f_info)+"/"+f_exec+" -o "+h_path)
+
+
+if input("Open app folder in Finder? (y/[n]): ").lower() == "y":
+    os.system("open "+tmp_ext+"/Payload/")
+
+print("Done.")
