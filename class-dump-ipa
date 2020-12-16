@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# class-dump-ipa v1.1 by @hc20k
 
 import os
 import sys
@@ -6,58 +7,53 @@ import zipfile
 import tempfile
 from pathlib import Path
 import plistlib
+import argparse
+import subprocess
 
-if len(sys.argv) < 3:
-    print("class-dump-ipa by hc20k!")
-    print("Usage: cdipa [IPA] [Output]"); exit(1);
+def dump_headers(ipa_path, header_dir, open_in_finder=False):
+    # Unzip to temp directory
+    print(f"[-] Unzipping IPA @ {ipa_path}")
+    extract_dir = tempfile.TemporaryDirectory().name
+    
+    with zipfile.ZipFile(ipa_path, 'r') as ipa_zip:
+        ipa_zip.extractall(extract_dir)
+        print('[+] Finished extracting.')
 
-ipa_path = sys.argv[1]
-h_path = sys.argv[2]
+    # Dump main executable
+    for plist in Path(f'{extract_dir}/Payload/').glob('*/Info.plist'):
+        with open(plist, 'rb') as fp:
+            app_folder = os.path.dirname(plist)
+            info = plistlib.load(fp)
+            executable = info["CFBundleExecutable"]
 
-print("Unzipping IPA")
+            print(f"[-] Dumping main executable: {executable}")
+            dumper = subprocess.run(["class-dump", "-H", os.path.join(app_folder,executable), "-o", header_dir])
+            dumper.check_returncode()
+            break
+    
+    # Dump frameworks
+    for plist in Path(f'{app_folder}/Frameworks/').glob('*/Info.plist'):
+        with open(plist, 'rb') as fp:
+            framework_folder = os.path.dirname(plist)
+            info = plistlib.load(fp)
+            executable = info['CFBundleExecutable']
 
-# unzip
-tmp_ext = tempfile.TemporaryDirectory().name;
-os.system("unzip "+ipa_path+" -d "+tmp_ext + " > /dev/null")
+            print(f"[-] Dumping framework: {executable}")
+            dumper = subprocess.run(["class-dump", "-H", os.path.join(framework_folder,executable), "-o", header_dir])
+            dumper.check_returncode()
+    
+    print("[+] Dumping complete!")
 
-print("Searching for Info.plist")
-# look for info.plist
-
-for filename in Path(tmp_ext+"/Payload/").glob('*/Info.plist'):
-    info = filename
-
-if not info:
-    print("Failed to find Info.plist."); exit(1);
-
-appfolder = os.path.dirname(info)
-
-with open(info, 'rb') as fp:
-    info = plistlib.load(fp)
-
-executable = info["CFBundleExecutable"]
-print("Dumping Executable: "+executable)
-
-# dump main Executable
-os.system("class-dump -H "+appfolder+"/"+executable+" -o "+h_path)
-
-# dump Frameworks
-
-framework_infos = []
-
-for filename in Path(appfolder+"/Frameworks/").glob('*/Info.plist'):
-    framework_infos.append(filename)
-
-for f_info in framework_infos:
-    # dump
-    with open(f_info, 'rb') as fp:
-        info = plistlib.load(fp)
-        f_exec = info["CFBundleExecutable"]
-        print("Dumping Framework: "+f_exec)
-
-    os.system("class-dump -H "+os.path.dirname(f_info)+"/"+f_exec+" -o "+h_path)
+    if open_in_finder:
+        print('[-] Opening in Finder...')
+        subprocess.run(["open",extract_dir])
+    
 
 
-if input("Open app folder in Finder? (y/[n]): ").lower() == "y":
-    os.system("open "+tmp_ext+"/Payload/")
-
-print("Done.")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Dumps headers from a decrypted .ipa and its frameworks.")
+    parser.add_argument("ipa_path", help="The path to the decrypted .ipa file you wish to dump.")
+    parser.add_argument("output_path", help="The path to the directory the header files will be dumped to.")
+    parser.add_argument("-o", help="Open app folder in Finder when done.", action="store_true")
+    args = parser.parse_args()
+    dump_headers(args.ipa_path, args.output_path, args.o)
